@@ -1,0 +1,24 @@
+# 환경변수 (API 키, 이메일 비밀번호)
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+venv/
+
+# 로그
+*.log
+monitor.log
+log/
+
+# 생성 파일 (서버에서 자동 생성됨)
+reports/live_bids_raw.json
+reports/*.db
+dashboard.html
+
+# OS
+.DS_Store
+Thumbs.db
