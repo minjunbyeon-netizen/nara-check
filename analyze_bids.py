@@ -227,6 +227,43 @@ body {{
 .chip strong {{ color: #fff; font-weight: 700; }}
 .chip.accent {{ background: #0071E3; border-color: #0071E3; }}
 
+/* 동기화 버튼 */
+.btn-sync {{
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 7px 16px;
+  background: #fff; color: #1D1D1F;
+  border: none; border-radius: 980px;
+  font-size: 13px; font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s, opacity 0.15s;
+  white-space: nowrap;
+}}
+.btn-sync:hover {{ background: #E8E8ED; }}
+.btn-sync:disabled {{ opacity: 0.5; cursor: not-allowed; }}
+.btn-sync .spin {{
+  width: 13px; height: 13px;
+  border: 2px solid #86868B;
+  border-top-color: #1D1D1F;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  display: none;
+}}
+.btn-sync.loading .spin {{ display: block; }}
+.btn-sync.loading .sync-icon {{ display: none; }}
+@keyframes spin {{ to {{ transform: rotate(360deg); }} }}
+
+/* 토스트 알림 */
+.toast {{
+  position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+  background: #1D1D1F; color: #fff;
+  padding: 10px 20px; border-radius: 980px;
+  font-size: 13px; font-weight: 500;
+  opacity: 0; transition: opacity 0.2s;
+  pointer-events: none; z-index: 999;
+  white-space: nowrap;
+}}
+.toast.show {{ opacity: 1; }}
+
 /* ── 툴바 ── */
 .toolbar {{
   background: #fff;
@@ -467,11 +504,21 @@ body {{
       <div class="header-title">나라장터 마케팅 공고 모니터링</div>
       <div class="header-meta">마지막 업데이트: {latest_str} &nbsp;|&nbsp; {db_info}</div>
     </div>
-    <div class="stat-chips">
-      <div class="chip"><strong>{total_cnt}</strong> 이번 수집</div>
-      <div class="chip accent"><strong>{a_cnt}</strong> A등급</div>
-      <div class="chip"><strong>{b_cnt}</strong> B등급</div>
-      <div class="chip" style="color:#FF9F0A;border-color:rgba(255,159,10,0.4)"><strong style="color:#FF9F0A">{alert_cnt}</strong> 마감임박</div>
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+      <div class="stat-chips">
+        <div class="chip"><strong>{total_cnt}</strong> 이번 수집</div>
+        <div class="chip accent"><strong>{a_cnt}</strong> A등급</div>
+        <div class="chip"><strong>{b_cnt}</strong> B등급</div>
+        <div class="chip" style="color:#FF9F0A;border-color:rgba(255,159,10,0.4)"><strong style="color:#FF9F0A">{alert_cnt}</strong> 마감임박</div>
+      </div>
+      <button class="btn-sync" id="syncBtn" onclick="syncData()">
+        <svg class="sync-icon" width="13" height="13" viewBox="0 0 13 13" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M11.5 6.5A5 5 0 1 1 6.5 1.5" stroke="#1D1D1F" stroke-width="1.5" stroke-linecap="round"/>
+          <path d="M9 1.5h2.5V4" stroke="#1D1D1F" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <div class="spin"></div>
+        데이터 동기화
+      </button>
     </div>
   </div>
 </header>
@@ -516,6 +563,9 @@ body {{
 <main class="main">
   <div class="grid" id="grid"></div>
 </main>
+
+<!-- 토스트 -->
+<div class="toast" id="toast"></div>
 
 <!-- 상세 패널 -->
 <div class="detail-overlay" id="overlay" onclick="closeDetail(event)">
@@ -664,6 +714,54 @@ function render() {{
     return;
   }}
   grid.innerHTML = list.map(makeCard).join('');
+}}
+
+// ── 토스트 ──
+function showToast(msg, duration=3000) {{
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), duration);
+}}
+
+// ── 동기화 ──
+function syncData() {{
+  const btn = document.getElementById('syncBtn');
+  btn.classList.add('loading');
+  btn.disabled = true;
+
+  fetch('/api/refresh', {{ method: 'POST' }})
+    .then(r => r.json())
+    .then(data => {{
+      if (data.status === 'already_running') {{
+        showToast('이미 수집 중입니다. 잠시 후 새로고침하세요.');
+        btn.classList.remove('loading');
+        btn.disabled = false;
+        return;
+      }}
+      showToast('수집 중... 완료되면 자동 새로고침됩니다.', 90000);
+      pollUntilDone();
+    }})
+    .catch(() => {{
+      showToast('서버 연결 오류');
+      btn.classList.remove('loading');
+      btn.disabled = false;
+    }});
+}}
+
+function pollUntilDone() {{
+  const interval = setInterval(() => {{
+    fetch('/api/status')
+      .then(r => r.json())
+      .then(data => {{
+        if (!data.running) {{
+          clearInterval(interval);
+          showToast('동기화 완료! 새로고침합니다...', 2000);
+          setTimeout(() => location.reload(), 1500);
+        }}
+      }})
+      .catch(() => clearInterval(interval));
+  }}, 3000);
 }}
 
 render();
