@@ -14,7 +14,7 @@ import os
 import threading
 from datetime import datetime
 
-from flask import Flask, jsonify, make_response, send_file
+from flask import Flask, jsonify, make_response, request, send_file
 from apscheduler.schedulers.background import BackgroundScheduler
 
 # ─── 로깅 ──────────────────────────────────────────────────
@@ -102,6 +102,26 @@ def status():
         "db": db,
         "dashboard_exists": os.path.exists("dashboard.html"),
     })
+
+
+@app.route("/api/settings", methods=["GET"])
+def get_settings():
+    from settings import load as load_settings
+    return jsonify(load_settings())
+
+
+@app.route("/api/settings", methods=["POST"])
+def post_settings():
+    from settings import save as save_settings
+    from analyze_bids import main as regen
+    data = request.get_json(force=True) or {}
+    updated = save_settings(data)
+    # 설정 변경 후 대시보드 즉시 재생성
+    try:
+        regen()
+    except Exception as e:
+        logger.error(f"설정 변경 후 대시보드 재생성 오류: {e}")
+    return jsonify({"status": "ok", "settings": updated})
 
 
 @app.route("/api/refresh", methods=["GET", "POST"])

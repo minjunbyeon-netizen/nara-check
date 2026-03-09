@@ -123,7 +123,13 @@ def _is_deadline_soon(deadline_str: str) -> bool:
         return False
 
 
-def get_today_marketing_bids(days_back: int = 7) -> list[dict]:
+def get_today_marketing_bids(days_back: int = None) -> list[dict]:
+    if days_back is None:
+        try:
+            from settings import load as load_settings
+            days_back = load_settings().get("collect_days", 7)
+        except Exception:
+            days_back = 7
     """최근 N일치 마케팅 공고 수집 (기본 7일, 주말 공백 대응)."""
     today = datetime.now()
     start = today - timedelta(days=days_back - 1)

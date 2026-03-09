@@ -6,58 +6,56 @@ import os
 import re
 from datetime import datetime, timedelta
 
-def score_bid(bid):
-    """공고 점수 계산 (100점 만점)"""
-    score = 50  # 기본 점수
+def score_bid(bid, cfg=None):
+    """공고 점수 계산 (100점 만점). cfg 없으면 settings에서 로드."""
+    if cfg is None:
+        from settings import load as load_settings
+        cfg = load_settings()
+
+    score = 50
 
     raw = bid.get("presmptPrce", 0) or 0
     budget = int(str(raw).replace(",", "")) if raw else 0
     method = bid.get("sucsfbidMthdNm", "")
     keywords = bid.get("_matched_keywords", [])
-    close_dt = bid.get("bidClseDt", "")
-    nm = bid.get("bidNtceNm", "")
 
-    # 예산 점수 (최대 +25)
-    if budget >= 500_000_000:
-        score += 25
-    elif budget >= 100_000_000:
-        score += 20
-    elif budget >= 50_000_000:
-        score += 15
-    elif budget >= 10_000_000:
-        score += 5
-    else:
-        score -= 5
+    # 예산 점수
+    for tier in cfg.get("budget_score", []):
+        if budget >= tier["min"]:
+            score += tier["pts"]
+            break
 
-    # 계약방식 점수 (협상 > 일반경쟁 > 제한경쟁)
-    if "협상" in method:
-        score += 15
-    elif "일반경쟁" in method or "일반" in method:
-        score += 5
+    # 계약방식 점수
+    for cs in cfg.get("contract_score", []):
+        if cs["keyword"] in method:
+            score += cs["pts"]
+            break
 
     # 키워드 다양성 (+최대 10)
     score += min(len(keywords) * 2, 10)
 
-    # 고부가가치 키워드
-    high_value = ["홍보대행", "마케팅대행", "광고대행", "디지털마케팅", "SNS운영", "콘텐츠제작"]
-    for kw in high_value:
-        if kw in keywords:
-            score += 5
-            break
+    # 고부가가치 키워드 보너스
+    high_value = cfg.get("high_value_keywords", [])
+    bonus = cfg.get("high_value_bonus", 5)
+    if any(kw in keywords for kw in high_value):
+        score += bonus
 
     # 마감 임박 패널티
     if bid.get("_deadline_alert"):
-        score -= 10
+        score += cfg.get("deadline_penalty", -10)
 
     return min(max(score, 0), 100)
 
 
-def grade(score):
-    if score >= 80:
+def grade(score, cfg=None):
+    if cfg is None:
+        from settings import load as load_settings
+        cfg = load_settings()
+    if score >= cfg.get("grade_a_min", 80):
         return "A"
-    elif score >= 65:
+    elif score >= cfg.get("grade_b_min", 65):
         return "B"
-    elif score >= 50:
+    elif score >= cfg.get("grade_c_min", 50):
         return "C"
     else:
         return "D"
@@ -493,6 +491,97 @@ body {{
 /* 빈 결과 */
 .empty {{ text-align: center; padding: 64px 24px; color: #86868B; grid-column: 1/-1; }}
 .empty p {{ font-size: 14px; margin-top: 8px; }}
+
+/* ── 설정 패널 ── */
+.cfg-overlay {{
+  display: none; position: fixed; inset: 0;
+  background: rgba(0,0,0,0.4); z-index: 300;
+}}
+.cfg-overlay.open {{ display: block; }}
+.cfg-panel {{
+  position: fixed; top: 0; right: -480px; width: 460px; height: 100vh;
+  background: #fff; z-index: 301;
+  box-shadow: -4px 0 24px rgba(0,0,0,0.12);
+  transition: right 0.2s ease;
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}}
+.cfg-overlay.open .cfg-panel {{ right: 0; }}
+.cfg-head {{
+  background: #1D1D1F; color: #fff;
+  padding: 18px 20px;
+  display: flex; justify-content: space-between; align-items: center;
+  flex-shrink: 0;
+}}
+.cfg-head h2 {{ font-size: 15px; font-weight: 700; }}
+.cfg-close {{
+  background: none; border: none; color: #fff;
+  font-size: 18px; cursor: pointer; line-height: 1;
+  width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
+  border-radius: 50%; transition: background 0.15s;
+}}
+.cfg-close:hover {{ background: rgba(255,255,255,0.15); }}
+.cfg-body {{ flex: 1; overflow-y: auto; padding: 20px; }}
+.cfg-section {{ margin-bottom: 24px; }}
+.cfg-section-title {{
+  font-size: 11px; font-weight: 700; color: #86868B;
+  text-transform: uppercase; letter-spacing: 0.5px;
+  margin-bottom: 12px; padding-bottom: 8px;
+  border-bottom: 1px solid #F5F5F7;
+}}
+.cfg-row {{
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 9px 0; border-bottom: 1px solid #F5F5F7;
+  gap: 12px;
+}}
+.cfg-row:last-child {{ border-bottom: none; }}
+.cfg-label {{ font-size: 13px; color: #1D1D1F; font-weight: 500; }}
+.cfg-desc {{ font-size: 11px; color: #86868B; margin-top: 2px; }}
+.cfg-select {{
+  padding: 6px 10px;
+  border: 1px solid #E8E8E8; border-radius: 8px;
+  font-size: 13px; color: #1D1D1F;
+  background: #fff; cursor: pointer; outline: none;
+  min-width: 110px;
+  transition: border-color 0.15s;
+}}
+.cfg-select:focus {{ border-color: #000; }}
+
+/* 채점 기준 테이블 */
+.score-table {{ width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 4px; }}
+.score-table th {{
+  text-align: left; padding: 6px 8px;
+  background: #F5F5F7; color: #86868B;
+  font-weight: 600; font-size: 11px; text-transform: uppercase;
+}}
+.score-table td {{ padding: 7px 8px; border-bottom: 1px solid #F5F5F7; color: #1D1D1F; }}
+.score-table tr:last-child td {{ border-bottom: none; }}
+.pts-plus {{ color: #34C759; font-weight: 700; }}
+.pts-minus {{ color: #FF3B30; font-weight: 700; }}
+.pts-neutral {{ color: #86868B; font-weight: 700; }}
+
+.cfg-foot {{
+  padding: 16px 20px; border-top: 1px solid #E8E8E8;
+  display: flex; gap: 10px; flex-shrink: 0;
+}}
+.cfg-btn-reset {{
+  flex: 1; padding: 10px; border: 1px solid #E8E8E8;
+  border-radius: 980px; background: #fff;
+  font-size: 13px; color: #1D1D1F; cursor: pointer;
+  transition: background 0.15s;
+}}
+.cfg-btn-reset:hover {{ background: #F5F5F7; }}
+.cfg-btn-save {{
+  flex: 2; padding: 10px; border: none;
+  border-radius: 980px; background: #1D1D1F;
+  color: #fff; font-size: 13px; font-weight: 700;
+  cursor: pointer; transition: background 0.15s;
+}}
+.cfg-btn-save:hover {{ background: #0071E3; }}
+.cfg-saved-msg {{
+  font-size: 12px; color: #34C759; text-align: center;
+  margin-top: 8px; display: none;
+}}
 </style>
 </head>
 <body>
@@ -556,6 +645,10 @@ body {{
       <button class="gf-btn" data-g="D" onclick="toggleGrade(this)">D</button>
     </div>
     <div class="result-count" id="resultCount"></div>
+    <button onclick="openCfg()" style="padding:7px 14px;border:1px solid #E8E8E8;border-radius:980px;background:#fff;font-size:12px;font-weight:700;color:#1D1D1F;cursor:pointer;display:flex;align-items:center;gap:6px;white-space:nowrap;">
+      <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><circle cx="6.5" cy="6.5" r="2" stroke="#1D1D1F" stroke-width="1.4"/><path d="M6.5 1v1.2M6.5 10.8V12M1 6.5h1.2M10.8 6.5H12M2.6 2.6l.85.85M9.55 9.55l.85.85M2.6 10.4l.85-.85M9.55 3.45l.85-.85" stroke="#1D1D1F" stroke-width="1.4" stroke-linecap="round"/></svg>
+      채점 기준
+    </button>
   </div>
 </div>
 
@@ -570,6 +663,168 @@ body {{
 <!-- 상세 패널 -->
 <div class="detail-overlay" id="overlay" onclick="closeDetail(event)">
   <div class="detail-panel" id="detailPanel"></div>
+</div>
+
+<!-- 설정 패널 -->
+<div class="cfg-overlay" id="cfgOverlay" onclick="closeCfgOutside(event)">
+  <div class="cfg-panel" id="cfgPanel">
+    <div class="cfg-head">
+      <h2>채점 기준 및 설정</h2>
+      <button class="cfg-close" onclick="closeCfg()">&#10005;</button>
+    </div>
+    <div class="cfg-body" id="cfgBody">
+      <!-- 로딩 중 -->
+      <div id="cfgLoading" style="text-align:center;padding:40px;color:#86868B;font-size:13px;">설정 불러오는 중...</div>
+      <div id="cfgContent" style="display:none;">
+
+        <!-- 채점 기준 (읽기 전용) -->
+        <div class="cfg-section">
+          <div class="cfg-section-title">예산 점수 기준 (기본점수 50점)</div>
+          <table class="score-table">
+            <thead><tr><th>예산 구간</th><th>점수</th></tr></thead>
+            <tbody>
+              <tr><td>5억원 이상</td><td><span class="pts-plus">+25</span></td></tr>
+              <tr><td>1억원 이상</td><td><span class="pts-plus">+20</span></td></tr>
+              <tr><td>5천만원 이상</td><td><span class="pts-plus">+15</span></td></tr>
+              <tr><td>1천만원 이상</td><td><span class="pts-plus">+5</span></td></tr>
+              <tr><td>1천만원 미만</td><td><span class="pts-minus">-5</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="cfg-section">
+          <div class="cfg-section-title">계약방식 점수</div>
+          <table class="score-table">
+            <thead><tr><th>계약방식</th><th>점수</th></tr></thead>
+            <tbody>
+              <tr><td>협상에 의한 계약</td><td><span class="pts-plus">+15</span></td></tr>
+              <tr><td>일반경쟁 / 일반</td><td><span class="pts-plus">+5</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="cfg-section">
+          <div class="cfg-section-title">기타 가감점</div>
+          <table class="score-table">
+            <thead><tr><th>항목</th><th>점수</th></tr></thead>
+            <tbody>
+              <tr><td>키워드 매칭 다양성 (최대)</td><td><span class="pts-plus">+10</span></td></tr>
+              <tr><td id="cfgHighValueRow">고부가 키워드 보너스</td><td><span class="pts-plus" id="cfgHighValuePts">+5</span></td></tr>
+              <tr><td>마감 D-3 이내 패널티</td><td><span class="pts-minus" id="cfgDeadlinePts">-10</span></td></tr>
+            </tbody>
+          </table>
+          <div style="font-size:11px;color:#86868B;margin-top:8px;">고부가 키워드: 홍보대행, 마케팅대행, 광고대행, 디지털마케팅, SNS운영, 콘텐츠제작</div>
+        </div>
+
+        <div class="cfg-section">
+          <div class="cfg-section-title">등급 기준</div>
+          <table class="score-table">
+            <thead><tr><th>등급</th><th>점수 범위</th></tr></thead>
+            <tbody>
+              <tr><td><span class="grade-badge badge-A">A등급</span></td><td id="gradeARow">80점 이상</td></tr>
+              <tr><td><span class="grade-badge badge-B">B등급</span></td><td id="gradeBRow">65~79점</td></tr>
+              <tr><td><span class="grade-badge badge-C">C등급</span></td><td id="gradeCRow">50~64점</td></tr>
+              <tr><td><span class="grade-badge badge-D">D등급</span></td><td>50점 미만</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- 수정 가능한 설정 -->
+        <div class="cfg-section">
+          <div class="cfg-section-title">수집 설정</div>
+          <div class="cfg-row">
+            <div>
+              <div class="cfg-label">수집 기간</div>
+              <div class="cfg-desc">최근 몇 일치 공고를 수집할지</div>
+            </div>
+            <select class="cfg-select" id="cfgCollectDays">
+              <option value="3">3일</option>
+              <option value="5">5일</option>
+              <option value="7">7일</option>
+              <option value="14">14일</option>
+              <option value="30">30일</option>
+            </select>
+          </div>
+          <div class="cfg-row">
+            <div>
+              <div class="cfg-label">마감 임박 알림 기준</div>
+              <div class="cfg-desc">마감 D-몇 이내를 임박으로 표시</div>
+            </div>
+            <select class="cfg-select" id="cfgDeadlineAlert">
+              <option value="1">D-1</option>
+              <option value="3">D-3</option>
+              <option value="5">D-5</option>
+              <option value="7">D-7</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="cfg-section">
+          <div class="cfg-section-title">등급 기준 점수 조정</div>
+          <div class="cfg-row">
+            <div>
+              <div class="cfg-label">A등급 최소 점수</div>
+              <div class="cfg-desc">이 점수 이상이면 A등급</div>
+            </div>
+            <select class="cfg-select" id="cfgGradeA">
+              <option value="70">70점</option>
+              <option value="75">75점</option>
+              <option value="80">80점</option>
+              <option value="85">85점</option>
+              <option value="90">90점</option>
+            </select>
+          </div>
+          <div class="cfg-row">
+            <div>
+              <div class="cfg-label">B등급 최소 점수</div>
+              <div class="cfg-desc">이 점수 이상이면 B등급</div>
+            </div>
+            <select class="cfg-select" id="cfgGradeB">
+              <option value="55">55점</option>
+              <option value="60">60점</option>
+              <option value="65">65점</option>
+              <option value="70">70점</option>
+              <option value="75">75점</option>
+            </select>
+          </div>
+          <div class="cfg-row">
+            <div>
+              <div class="cfg-label">C등급 최소 점수</div>
+              <div class="cfg-desc">이 점수 이상이면 C등급</div>
+            </div>
+            <select class="cfg-select" id="cfgGradeC">
+              <option value="40">40점</option>
+              <option value="45">45점</option>
+              <option value="50">50점</option>
+              <option value="55">55점</option>
+              <option value="60">60점</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="cfg-section">
+          <div class="cfg-section-title">기본 정렬</div>
+          <div class="cfg-row">
+            <div>
+              <div class="cfg-label">기본 정렬 기준</div>
+              <div class="cfg-desc">페이지 로드 시 기본 정렬 방식</div>
+            </div>
+            <select class="cfg-select" id="cfgSort">
+              <option value="score">점수 높은 순</option>
+              <option value="budget">예산 높은 순</option>
+              <option value="deadline">마감 임박 순</option>
+            </select>
+          </div>
+        </div>
+
+        <div id="cfgSavedMsg" class="cfg-saved-msg">저장되었습니다. 대시보드를 재생성 중...</div>
+      </div>
+    </div>
+    <div class="cfg-foot">
+      <button class="cfg-btn-reset" onclick="resetCfg()">기본값 복원</button>
+      <button class="cfg-btn-save" onclick="saveCfg()">저장 및 적용</button>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -762,6 +1017,105 @@ function pollUntilDone() {{
       }})
       .catch(() => clearInterval(interval));
   }}, 3000);
+}}
+
+// ── 설정 패널 ──
+function openCfg() {{
+  document.getElementById('cfgOverlay').classList.add('open');
+  loadCfg();
+}}
+
+function closeCfg() {{
+  document.getElementById('cfgOverlay').classList.remove('open');
+}}
+
+function closeCfgOutside(e) {{
+  if (e.target === document.getElementById('cfgOverlay')) closeCfg();
+}}
+
+function loadCfg() {{
+  document.getElementById('cfgLoading').style.display = 'block';
+  document.getElementById('cfgContent').style.display = 'none';
+
+  fetch('/api/settings')
+    .then(r => r.json())
+    .then(cfg => {{
+      // 드롭다운에 현재 값 반영
+      setSelect('cfgCollectDays',  String(cfg.collect_days      || 7));
+      setSelect('cfgDeadlineAlert', String(cfg.deadline_alert_days || 3));
+      setSelect('cfgGradeA',        String(cfg.grade_a_min      || 80));
+      setSelect('cfgGradeB',        String(cfg.grade_b_min      || 65));
+      setSelect('cfgGradeC',        String(cfg.grade_c_min      || 50));
+      setSelect('cfgSort',          cfg.default_sort            || 'score');
+
+      // 가감점 표시
+      const hp = cfg.high_value_bonus || 5;
+      const dp = cfg.deadline_penalty || -10;
+      document.getElementById('cfgHighValuePts').textContent = (hp >= 0 ? '+' : '') + hp;
+      document.getElementById('cfgDeadlinePts').textContent  = (dp >= 0 ? '+' : '') + dp;
+
+      // 등급 범위 텍스트
+      const a = cfg.grade_a_min || 80;
+      const b = cfg.grade_b_min || 65;
+      const c = cfg.grade_c_min || 50;
+      document.getElementById('gradeARow').textContent = a + '점 이상';
+      document.getElementById('gradeBRow').textContent = b + '~' + (a-1) + '점';
+      document.getElementById('gradeCRow').textContent = c + '~' + (b-1) + '점';
+
+      document.getElementById('cfgLoading').style.display = 'none';
+      document.getElementById('cfgContent').style.display = 'block';
+    }})
+    .catch(() => {{
+      document.getElementById('cfgLoading').textContent = '설정을 불러올 수 없습니다.';
+    }});
+}}
+
+function setSelect(id, val) {{
+  const el = document.getElementById(id);
+  if (!el) return;
+  const opt = el.querySelector(`option[value="${{val}}"]`);
+  if (opt) el.value = val;
+}}
+
+function saveCfg() {{
+  const payload = {{
+    collect_days:        parseInt(document.getElementById('cfgCollectDays').value),
+    deadline_alert_days: parseInt(document.getElementById('cfgDeadlineAlert').value),
+    grade_a_min:         parseInt(document.getElementById('cfgGradeA').value),
+    grade_b_min:         parseInt(document.getElementById('cfgGradeB').value),
+    grade_c_min:         parseInt(document.getElementById('cfgGradeC').value),
+    default_sort:        document.getElementById('cfgSort').value,
+  }};
+
+  const savedMsg = document.getElementById('cfgSavedMsg');
+  savedMsg.style.display = 'block';
+
+  fetch('/api/settings', {{
+    method: 'POST',
+    headers: {{'Content-Type': 'application/json'}},
+    body: JSON.stringify(payload),
+  }})
+    .then(r => r.json())
+    .then(() => {{
+      showToast('설정이 저장되었습니다. 대시보드 재생성 중...');
+      setTimeout(() => {{
+        closeCfg();
+        location.reload();
+      }}, 2000);
+    }})
+    .catch(() => {{
+      savedMsg.textContent = '저장 실패. 다시 시도해 주세요.';
+      savedMsg.style.color = '#FF3B30';
+    }});
+}}
+
+function resetCfg() {{
+  setSelect('cfgCollectDays', '7');
+  setSelect('cfgDeadlineAlert', '3');
+  setSelect('cfgGradeA', '80');
+  setSelect('cfgGradeB', '65');
+  setSelect('cfgGradeC', '50');
+  setSelect('cfgSort', 'score');
 }}
 
 render();
