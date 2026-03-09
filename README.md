@@ -1,148 +1,147 @@
-# 나라장터 마케팅 공고 모니터링 시스템
+# 나라장터 마케팅 공고 모니터링
 
-조달청 나라장터에서 마케팅/광고 관련 입찰 공고를 매일 자동 수집하고,
-Claude AI가 분석하여 입찰 추천 리포트를 이메일로 발송하는 시스템입니다.
-
----
-
-## 무엇을 해주나요?
-
-- **매일 오전 7시** 자동 실행
-- SNS 관리, 홍보영상 제작, 광고물, 온라인광고, 옥외광고 등 40+ 키워드로 공고 필터링
-- Claude AI가 각 공고를 분석하여 **점수(0~100점) + 추천 이유** 생성
-- 마크다운 + HTML 리포트 파일 저장
-- 이메일로 리포트 자동 발송
+나라장터 공공데이터 API에서 마케팅 관련 공고를 자동 수집·분석하여 웹 대시보드로 제공하는 시스템입니다.
 
 ---
 
-## 설치 방법
-
-### 1단계: Python 패키지 설치
-
-```bash
-cd narajangteo-monitor
-pip install -r requirements.txt
-```
-
-### 2단계: API 키 발급
-
-#### 나라장터 API 키 (필수)
-1. [공공데이터포털](https://www.data.go.kr) 회원가입
-2. `나라장터 입찰공고정보서비스` 검색 후 활용 신청
-3. 승인 후 마이페이지에서 서비스 키 확인 (보통 1~2일 소요)
-
-#### Claude API 키 (필수)
-1. [Anthropic Console](https://console.anthropic.com) 접속
-2. API Keys 메뉴에서 새 키 생성
-
-#### Gmail 앱 비밀번호 (이메일 발송 원하는 경우)
-1. Google 계정 → 보안 → 2단계 인증 활성화
-2. 앱 비밀번호 생성 (16자리)
-
-### 3단계: 환경 변수 설정
-
-```bash
-copy .env.example .env
-```
-
-`.env` 파일을 열어 실제 값으로 수정:
-
-```
-NARAJANGTEO_API_KEY=발급받은_서비스_키
-ANTHROPIC_API_KEY=sk-ant-...
-EMAIL_SENDER=내이메일@gmail.com
-EMAIL_PASSWORD=앱비밀번호16자리
-EMAIL_RECIPIENT=받을이메일@gmail.com
-```
-
----
-
-## 실행 방법
-
-### 수동 실행 (테스트)
-
-```bash
-python main.py
-```
-
-실행 후 `reports/` 폴더에 리포트가 생성됩니다.
-
-### 매일 자동 실행 등록 (Windows)
-
-```bash
-python setup_scheduler.py
-```
-
-또는 직접 작업 스케줄러 등록:
-1. Windows 검색 → **작업 스케줄러** 열기
-2. **기본 작업 만들기** 클릭
-3. 트리거: 매일 / 시작 시간 07:00
-4. 동작: 프로그램 시작
-5. 프로그램: `python`
-6. 인수 추가: `main.py`
-7. 시작 위치: `(이 폴더 경로)`
-
----
-
-## 리포트 확인
-
-- **파일**: `reports/report_YYYY-MM-DD.md` (마크다운)
-- **파일**: `reports/report_YYYY-MM-DD.html` (브라우저에서 열기)
-- **이메일**: 설정한 수신 주소로 HTML 리포트 발송
-
-### 리포트 샘플
-
-```
-# 나라장터 마케팅 공고 일일 리포트
-날짜: 2026-03-06 | 총 공고수: 12건 | 추천 공고: 3건
-
-## 강력 추천 공고 (3건)
-
-### ★★★★★ [강력추천] ○○시 SNS 홍보 운영 용역
-- 발주기관: ○○광역시청
-- 예산: 48,000,000원
-- 마감일: 2026-03-20
-- AI 점수: 92점
-
-추천 이유: 예산 4800만원 규모의 SNS 운영 공고입니다.
-지역 제한 없이 전국 입찰 가능하며, 마감까지 2주 여유가 있습니다...
-```
-
----
-
-## 키워드 커스터마이징
-
-`config.py`의 `MARKETING_KEYWORDS` 목록에 원하는 키워드를 추가하거나 제거할 수 있습니다.
-
----
-
-## 로그 확인
-
-실행 로그는 `monitor.log` 파일에 저장됩니다.
-
-```bash
-type monitor.log
-```
-
----
-
-## 파일 구조
+## 프로젝트 구조
 
 ```
 narajangteo-monitor/
-├── .env                ← API 키 설정 (직접 생성, git 제외)
-├── .env.example        ← 설정 템플릿
-├── requirements.txt
-├── main.py             ← 메인 실행 파일
-├── config.py           ← 설정 및 키워드
-├── fetcher.py          ← 나라장터 API 호출
-├── analyzer.py         ← Claude AI 분석
-├── reporter.py         ← 리포트 생성
-├── notifier.py         ← 이메일 발송
-├── setup_scheduler.py  ← 스케줄러 자동 등록
-├── run_daily.bat       ← 배치 실행 파일
-├── monitor.log         ← 실행 로그 (자동 생성)
-└── reports/            ← 리포트 저장 폴더 (자동 생성)
-    ├── report_2026-03-06.md
-    └── report_2026-03-06.html
+├── server.py           # Flask 웹서버 + APScheduler (메인 진입점)
+├── fetcher.py          # 나라장터 API 수집 + 카테고리/지역/공동수급 분류
+├── analyze_bids.py     # 점수 산정 + 등급 부여 + dashboard.html 생성
+├── analyzer.py         # Claude AI 분석 배치 처리
+├── db.py               # SQLite DB 관리 (upsert, 조회)
+├── settings.py         # 설정 관리 (DEFAULT + reports/settings.json 오버라이드)
+├── config.py           # 키워드 상수 (카테고리별 분류 키워드)
+├── requirements.txt    # Python 의존성
+├── Procfile            # Railway/Render 배포용
+├── .env.example        # 환경변수 샘플
+├── reports/
+│   ├── bids.db         # SQLite DB (공고 누적 저장)
+│   ├── settings.json   # 사용자 설정 저장 (자동 생성)
+│   └── live_bids_raw.json  # 마지막 수집 원본 JSON
+└── log/
+    └── YYYY-MM-DD.log  # 작업 로그 (날짜별)
 ```
+
+---
+
+## 핵심 기능
+
+### 수집 대상
+- **SNS 관리**: 1억 내외 (플러스 마이너스) 공고 우선
+- **홍보영상**: 금액 무관 전체 수집
+- **인쇄물**: 홍보물/현수막/브로슈어 등
+- **행사용역**: 공동수급 가능 조건 우선
+- **지역**: 부산/울산/경남(부울경) 우선
+
+### 등급 체계 (S-A-B-C-D)
+
+기본 30점 + 아래 가산점 합산:
+
+| 항목 | 점수 |
+|------|------|
+| 예산 5억 이상 | +30 |
+| 예산 2억 이상 | +25 |
+| 예산 1억 이상 | +20 |
+| 예산 5천만 이상 | +13 |
+| 예산 3천만 이상 | +8 |
+| 예산 1천만 이상 | +4 |
+| 계약방식: 협상 | +15 |
+| 계약방식: 일반경쟁 | +5 |
+| 부울경(부산/울산/경남) | +10 |
+| 공동수급 | +5 |
+| SNS관리 / 홍보영상 카테고리 | +8 |
+| 행사용역 카테고리 | +5 |
+| 인쇄물 카테고리 | +4 |
+| 마케팅 카테고리 | +2 |
+| 고부가 키워드 포함 | +5 |
+| 키워드 다양성 (최대) | +8 |
+| 마감 임박 (3일 이내) | -20 |
+
+| 등급 | 기준 |
+|------|------|
+| S | 90점 이상 |
+| A | 75점 이상 |
+| B | 60점 이상 |
+| C | 45점 이상 |
+| D | 45점 미만 |
+
+### 자동 수집 스케줄
+- **매주 화요일 / 금요일 오전 09:00** (한국 시간)
+- 수동 수집: 대시보드 상단 "데이터 동기화" 버튼
+
+---
+
+## 설치 및 실행
+
+### 환경 설정
+
+```bash
+pip install -r requirements.txt
+```
+
+`.env` 파일 생성 (`.env.example` 참고):
+
+```
+NARA_API_KEY=나라장터_API_키
+```
+
+### 로컬 실행
+
+```bash
+python server.py
+```
+
+브라우저에서 `http://127.0.0.1:5000` 접속
+
+### Windows 독립 실행 (창 유지)
+
+```powershell
+Start-Process python -ArgumentList 'server.py' -WorkingDirectory '프로젝트_경로' -WindowStyle Normal
+```
+
+---
+
+## 배포 (Railway / Render)
+
+`Procfile`에 실행 명령 정의됨:
+
+```
+web: python server.py
+```
+
+환경변수 설정:
+- `NARA_API_KEY`: 나라장터 공공데이터 API 키
+- `PORT`: 포트 (플랫폼 자동 주입)
+- `SETTINGS_PATH`: `/data/settings.json` (볼륨 마운트 시)
+
+---
+
+## API 엔드포인트
+
+| 메서드 | 경로 | 설명 |
+|--------|------|------|
+| GET | `/` | 대시보드 HTML |
+| GET | `/api/status` | 수집 현황 JSON |
+| POST | `/api/refresh` | 즉시 수집 트리거 |
+| GET | `/api/settings` | 현재 설정 조회 |
+| POST | `/api/settings` | 설정 변경 + 대시보드 재생성 |
+
+---
+
+## 인코딩 주의사항
+
+Windows 환경에서 CMD 창에 한글 로그가 깨질 수 있습니다.
+
+- 기능 동작에는 영향 없음 (파일/DB는 UTF-8로 정상 저장)
+- Python 실행 시 환경변수 추가: `set PYTHONIOENCODING=utf-8`
+- PowerShell에서 실행하면 일부 개선됨
+
+---
+
+## GitHub
+
+저장소: https://github.com/minjunbyeon-netizen/nara-check
