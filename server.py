@@ -140,11 +140,15 @@ if __name__ == "__main__":
         logger.info("초기 실행: dashboard.html 없음 → 즉시 수집")
         threading.Thread(target=run_collection, daemon=True).start()
 
-    # 6시간마다 자동 수집 (한국 시간 기준)
+    # 매주 화요일/금요일 오전 9시 자동 수집 (한국 시간 기준)
     scheduler = BackgroundScheduler(timezone="Asia/Seoul")
-    scheduler.add_job(run_collection, "interval", hours=6, id="auto_collect")
+    scheduler.add_job(
+        run_collection, "cron",
+        day_of_week="tue,fri", hour=9, minute=0,
+        id="weekly_tue_fri"
+    )
     scheduler.start()
-    logger.info("스케줄러 시작: 6시간마다 자동 수집")
+    logger.info("스케줄러 시작: 매주 화요일/금요일 09:00 자동 수집")
 
     port = int(os.environ.get("PORT", 5000))
     logger.info(f"서버 시작: http://0.0.0.0:{port}")

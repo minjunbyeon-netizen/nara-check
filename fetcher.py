@@ -9,6 +9,9 @@ from config import (
     NARAJANGTEO_BASE_URL,
     NARAJANGTEO_SERVICE_ENDPOINT,
     MARKETING_KEYWORDS,
+    CATEGORY_KEYWORDS,
+    BOULGYEONG_KEYWORDS,
+    JOINT_BID_KEYWORDS,
     DEADLINE_ALERT_DAYS,
 )
 
@@ -47,13 +50,11 @@ def fetch_bids_for_date(target_date: datetime) -> list[dict]:
             logger.error(f"JSON 파싱 오류: {e}")
             break
 
-        # 응답 구조 파싱
         try:
             body = data.get("response", {}).get("body", {})
             items = body.get("items", [])
             if not items:
                 break
-            # items가 리스트인 경우 (새 API 포맷) vs 딕셔너리인 경우 (구 포맷)
             if isinstance(items, list):
                 item_list = items
             elif isinstance(items, dict):
@@ -80,27 +81,80 @@ def fetch_bids_for_date(target_date: datetime) -> list[dict]:
     return all_bids
 
 
+def _classify_category(search_text: str, matched_keywords: list[str]) -> str:
+    """매칭된 키워드를 기반으로 공고 카테고리를 분류한다."""
+    for category, keywords in CATEGORY_KEYWORDS.items():
+        for kw in keywords:
+            if kw.lower() in search_text:
+                return category
+    return "마케팅"
+
+
+def _is_boulgyeong(search_text: str) -> bool:
+    """부울경(부산/울산/경남) 기관 여부 감지."""
+    return any(kw in search_text for kw in BOULGYEONG_KEYWORDS)
+
+
+def _has_joint_bid(search_text: str) -> bool:
+    """공동수급 가능 여부 감지."""
+    return any(kw.lower() in search_text for kw in JOINT_BID_KEYWORDS)
+
+
 def filter_marketing_bids(bids: list[dict]) -> list[dict]:
-    """마케팅/광고 관련 키워드로 공고 필터링."""
-    keywords_lower = [kw.lower() for kw in MARKETING_KEYWORDS]
+    """마케팅/광고 관련 키워드로 공고 필터링 + 카테고리/지역/공동수급 분류."""
     filtered = []
 
     for bid in bids:
         bid_nm = bid.get("bidNtceNm", "")        # 입찰공고명
         ntce_instt = bid.get("ntceInsttNm", "")  # 공고기관명
+        dminstt = bid.get("dminsttNm", "")       # 수요기관명
+        prtcpt_rgn = bid.get("prtcptLmtRgn", "") # 참가지역제한
 
-        search_text = (bid_nm + " " + ntce_instt).lower()
+        search_text = (bid_nm + " " + ntce_instt + " " + dminstt).lower()
+        region_text = (prtcpt_rgn + " " + ntce_instt + " " + dminstt).lower()
+
         matched_keywords = [kw for kw in MARKETING_KEYWORDS if kw.lower() in search_text]
 
-        if matched_keywords:
-            bid["_matched_keywords"] = matched_keywords
-            bid["_deadline_alert"] = _is_deadline_soon(bid.get("bidClseDt", ""))
-            filtered.append(bid)
+        if not matched_keywords:
+            continue
+
+        # 카테고리 분류
+        category = _classify_category(search_text, matched_keywords)
+
+        # 부울경 여부
+        is_boulgyeong = _is_boulgyeong(region_text)
+
+        # 공동수급 가능 여부 (공고명 + 기관명 전체 텍스트에서 확인)
+        full_text = search_text + " " + bid.get("cntrctCnclsMthd", "").lower()
+        joint_bid = _has_joint_bid(full_text)
+
+        bid["_matched_keywords"] = matched_keywords
+        bid["_category"] = category
+        bid["_is_boulgyeong"] = is_boulgyeong
+        bid["_joint_bid"] = joint_bid
+        bid["_deadline_alert"] = _is_deadline_soon(bid.get("bidClseDt", ""))
+
+        filtered.append(bid)
 
     logger.info(f"마케팅 관련 공고 필터링: {len(bids)}건 → {len(filtered)}건")
+
+    # 카테고리별 통계
+    from collections import Counter
+    cat_counts = Counter(b["_category"] for b in filtered)
+    for cat, cnt in cat_counts.items():
+        logger.info(f"  [{cat}] {cnt}건")
+
+    boulgyeong_count = sum(1 for b in filtered if b.get("_is_boulgyeong"))
+    joint_count = sum(1 for b in filtered if b.get("_joint_bid"))
+    if boulgyeong_count:
+        logger.info(f"  부울경 기관: {boulgyeong_count}건")
+    if joint_count:
+        logger.info(f"  공동수급 가능: {joint_count}건")
+
     alert_count = sum(1 for b in filtered if b.get("_deadline_alert"))
     if alert_count:
         logger.info(f"  마감 D-{DEADLINE_ALERT_DAYS} 이내 알림 공고: {alert_count}건")
+
     return filtered
 
 
@@ -108,13 +162,9 @@ def _is_deadline_soon(deadline_str: str) -> bool:
     """마감일이 오늘 기준 DEADLINE_ALERT_DAYS일 이내이면 True."""
     if not deadline_str:
         return False
-    # 나라장터 API 날짜 포맷 처리:
-    #   "202603151800"  → 12자리 숫자 (YYYYMMDDHHMM)
-    #   "2026-03-15 18:00:00" → datetime 문자열
-    #   "2026-03-15" → 날짜만
     import re
-    digits = re.sub(r"\D", "", deadline_str.strip())  # 숫자만 추출
-    date_part = digits[:8]  # 앞 8자리 = YYYYMMDD
+    digits = re.sub(r"\D", "", deadline_str.strip())
+    date_part = digits[:8]
     try:
         deadline = datetime.strptime(date_part, "%Y%m%d")
         days_left = (deadline.date() - datetime.now().date()).days
@@ -157,9 +207,14 @@ def get_today_marketing_bids(days_back: int = None) -> list[dict]:
 
 def format_bid_summary(bid: dict) -> str:
     """공고 딕셔너리를 읽기 쉬운 텍스트로 변환."""
+    boulgyeong_tag = " [부울경]" if bid.get("_is_boulgyeong") else ""
+    joint_tag = " [공동수급가능]" if bid.get("_joint_bid") else ""
+    category_tag = bid.get("_category", "")
+
     return (
         f"공고번호: {bid.get('bidNtceNo', 'N/A')}\n"
         f"공고명: {bid.get('bidNtceNm', 'N/A')}\n"
+        f"카테고리: {category_tag}{boulgyeong_tag}{joint_tag}\n"
         f"발주기관: {bid.get('ntceInsttNm', 'N/A')}\n"
         f"수요기관: {bid.get('dminsttNm', bid.get('ntceInsttNm', 'N/A'))}\n"
         f"공고일시: {bid.get('bidNtceDt', 'N/A')}\n"
